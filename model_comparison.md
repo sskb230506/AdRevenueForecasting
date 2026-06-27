@@ -1,6 +1,6 @@
 # Model Tuning & Comparison: Tweedie Objective & Hyperparameter Optimization
 
-This document records the baseline model results, the Tweedie objective experiments, and the results of **Optuna Hyperparameter Tuning** (150 trials).
+This document records the baseline model results, the Tweedie objective experiments, the results of **Optuna Hyperparameter Tuning**, and **Feature Engineering Experiments**.
 
 ---
 
@@ -55,18 +55,6 @@ Tweedie was evaluated in two setups:
 
 Using the best objective (**Tweedie on Raw Target with `tweedie_variance_power=1.05`**), we ran an automated Optuna study to optimize the remaining hyperparameters.
 
-### Search Space
-- `learning_rate`: `[0.005, 0.2]` (Log scale)
-- `num_leaves`: `[15, 127]`
-- `max_depth`: `[3, 12]`
-- `min_data_in_leaf` (`min_child_samples`): `[5, 100]`
-- `bagging_fraction` (`subsample`): `[0.4, 1.0]`
-- `bagging_freq`: `[1, 10]`
-- `feature_fraction` (`colsample_bytree`): `[0.4, 1.0]`
-- `lambda_l1` (`reg_alpha`): `[1e-8, 10.0]` (Log scale)
-- `lambda_l2` (`reg_lambda`): `[1e-8, 10.0]` (Log scale)
-- `min_gain_to_split` (`min_split_gain`): `[0.0, 15.0]`
-
 ### Best Hyperparameters Found
 ```json
 {
@@ -103,9 +91,34 @@ To verify that these tuning results generalize well and do not overfit the valid
 
 ---
 
-## 🏆 Summary & Recommendation
+## 5. Feature Engineering Experiments
 
-1. **Optimal Model Configuration:** We recommend using the **Tuned Tweedie model** (`objective="tweedie"`, `tweedie_variance_power=1.05`) trained on the raw `revenue` target, using the hyperparameters discovered by Optuna.
-2. **Robust Performance Gains:** 
-   - Under cross-validation, the Tuned Tweedie model reduces WAPE from `49.24%` to `46.87%`.
-   - On the final unseen holdout set, the Tuned Tweedie model reduces WAPE from `52.25%` to `49.28%` and lifts $R^2$ from `0.5295` to `0.6194` (a relative improvement of **17%**).
+We evaluated five separate feature engineering experiments on top of our best tuned Tweedie model, using walk-forward 4-fold CV to check for performance gains.
+
+### Experiments Definition
+- **Baseline Feature Set:** Standard features (`lag_1`, `lag_2`, `lag_4`, `rolling_4w` for revenue, spend, and ROAS).
+- **Experiment A:** Adds `lag_8` and `lag_12` for revenue, spend, and ROAS.
+- **Experiment B:** Adds `lag_26` and `lag_52` for revenue, spend, and ROAS.
+- **Experiment C:** Adds expanding point-in-time mean for spend and ROAS (complementing the existing revenue baseline).
+- **Experiment D:** Adds 8-week and 12-week rolling standard deviations.
+- **Experiment E:** Adds 4-week and 8-week rolling medians.
+
+### Results Comparison
+*Evaluated on the exact same dataset splits:*
+
+| Experiment | Mean CV $R^2$ | Mean CV WAPE | Mean CV MAE | Mean CV RMSE | Status |
+| :--- | :---: | :---: | :---: | :---: | :---: |
+| **Tuned Baseline (Tweedie)** | **0.6967** | **46.87%** | **1,191.34** | **3,091.67** | **Best** |
+| **Experiment A (lag 8, 12)** | 0.6948 | 47.44% | 1,186.02 | 3,013.79 | Degraded |
+| **Experiment B (lag 26, 52)** | 0.6900 | 47.46% | 1,188.71 | 3,055.54 | Degraded |
+| **Experiment C (expanding mean)**| 0.6937 | 47.48% | 1,197.10 | 3,066.99 | Degraded |
+| **Experiment D (rolling std)** | 0.6766 | 48.21% | 1,207.54 | 3,087.54 | Degraded |
+| **Experiment E (rolling median)** | 0.6838 | 47.88% | 1,208.76 | 3,133.00 | Degraded |
+
+> [!WARNING]
+> **Why did additional features degrade performance?**
+> 1. **Overfitting/Noise:** Adding more columns to a relatively small weekly dataset (3,278 rows) leads to higher model variance and overfitting, increasing CV error.
+> 2. **Young Campaigns & NaNs:** Long lag features (like `lag_26` and `lag_52`) or long rolling windows introduce a high fraction of NaN values for newer campaigns. This missingness reduces the quality of split decisions in LightGBM and adds noise.
+
+### Recommendation
+Keep the **Tuned Baseline Feature Set** without adding any of the experimental lag or rolling feature groups.
